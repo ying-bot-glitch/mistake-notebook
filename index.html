@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>错题本 Pro - 稳定版</title>
+    <title>错题本 Pro - 智能同步版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -16,7 +16,7 @@
             #print-section { display: block !important; background: white; }
             body { background: white; }
         }
-        canvas { touch-action: none; } /* 关键：防止 iPhone 涂抹时页面滚动 */
+        canvas { touch-action: none; cursor: crosshair; }
         .loading-dots:after { content: ' .'; animation: dots 1.5s steps(5, end) infinite; }
         @keyframes dots { 0%, 20% { content: ' .'; } 40% { content: ' ..'; } 60% { content: ' ...'; } 80%, 100% { content: ''; } }
     </style>
@@ -26,15 +26,17 @@
     <!-- 启动加载遮罩 -->
     <div id="loading-overlay" class="fixed inset-0 bg-white z-[200] flex items-center justify-center flex-col">
         <div class="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-slate-500 font-medium loading-dots">正在初始化云端数据库</p>
+        <p id="loading-text" class="text-slate-500 font-medium loading-dots">正在初始化数据库</p>
+        <button id="fallback-btn" onclick="useLocalStorage()" class="hidden mt-4 text-xs text-amber-600 underline">连接超时？点击进入本地模式</button>
     </div>
 
     <!-- 导航栏 -->
     <nav class="bg-white shadow-sm border-b border-slate-100 sticky top-0 z-50 no-print">
         <div class="max-w-4xl mx-auto px-4 flex justify-between h-16 items-center">
             <div class="flex items-center space-x-2">
-                <span class="text-2xl">☁️</span>
+                <span class="text-2xl">📓</span>
                 <span class="font-bold text-lg">错题本 Pro</span>
+                <span id="storage-mode" class="text-[10px] bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full font-normal">连接中</span>
             </div>
             <div class="flex space-x-5 text-sm">
                 <button id="nav-dashboard" onclick="switchView('dashboard')" class="py-5 text-amber-600 font-bold border-b-2 border-amber-600">概览</button>
@@ -45,7 +47,6 @@
     </nav>
 
     <main class="flex-grow container mx-auto px-4 py-6 max-w-4xl no-print">
-        
         <!-- 概览模块 -->
         <section id="view-dashboard" class="space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -55,31 +56,27 @@
                 </div>
                 <div class="bg-amber-500 p-6 rounded-3xl shadow-lg text-white flex flex-col justify-between">
                     <div>
-                        <p class="text-white/70 text-sm">云端题目总数</p>
+                        <p class="text-white/70 text-sm">已存题目数量</p>
                         <h2 id="total-count" class="text-5xl font-black">0</h2>
                     </div>
-                    <p class="text-xs text-white/80 leading-relaxed mt-4">数据已通过加密通道实时同步。手机拍照后，电脑端刷新即可组卷。</p>
+                    <p id="sync-info" class="text-xs text-white/80 leading-relaxed mt-4">正在同步数据...</p>
                 </div>
             </div>
         </section>
 
         <!-- 录入模块 -->
         <section id="view-add" class="hidden">
-            <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-                <div id="upload-area" class="border-4 border-dashed border-slate-100 rounded-3xl p-12 text-center" onclick="document.getElementById('file-input').click()">
+            <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm text-center">
+                <div id="upload-area" class="border-4 border-dashed border-slate-100 rounded-3xl p-12" onclick="document.getElementById('file-input').click()">
                     <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
                     <div class="text-5xl mb-4">📸</div>
-                    <p class="font-bold text-slate-600">拍摄错题照片</p>
-                    <p class="text-xs text-slate-400 mt-2">支持 Safari 直接调用摄像头</p>
+                    <p class="font-bold text-slate-600">拍照录入错题</p>
+                    <p class="text-xs text-slate-400 mt-2">支持 Safari 摄像头调用</p>
                 </div>
-
                 <div id="editor-area" class="hidden space-y-4">
                     <div class="flex items-center justify-between bg-slate-50 p-3 rounded-2xl">
-                        <div class="flex items-center space-x-3">
-                            <span class="text-xs font-bold text-slate-500">笔触:</span>
-                            <input type="range" id="brush-size" min="10" max="80" value="30" class="accent-amber-500 w-24">
-                        </div>
-                        <button onclick="resetEditor()" class="text-xs text-red-400 font-bold">重拍</button>
+                        <input type="range" id="brush-size" min="10" max="80" value="30" class="accent-amber-500 w-full mx-4">
+                        <button onclick="resetEditor()" class="text-xs text-red-400 font-bold shrink-0">重拍</button>
                     </div>
                     <div class="flex justify-center bg-slate-100 rounded-2xl overflow-hidden border border-slate-200">
                         <canvas id="imageCanvas"></canvas>
@@ -88,9 +85,9 @@
                         <select id="input-subject" class="p-3 bg-slate-50 rounded-xl border-0 text-sm font-bold">
                             <option>数学</option><option>语文</option><option>英语</option><option>物理</option><option>化学</option>
                         </select>
-                        <input type="text" id="input-tags" placeholder="知识点(可选)" class="p-3 bg-slate-50 rounded-xl border-0 text-sm font-bold">
+                        <input type="text" id="input-tags" placeholder="知识点" class="p-3 bg-slate-50 rounded-xl border-0 text-sm font-bold">
                     </div>
-                    <button id="save-btn" onclick="saveMistake()" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold hover:bg-amber-600 transition">保存到云端</button>
+                    <button id="save-btn" onclick="saveMistake()" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold">保存错题</button>
                 </div>
             </div>
         </section>
@@ -98,7 +95,7 @@
         <!-- 题库模块 -->
         <section id="view-list" class="hidden space-y-4">
             <div class="flex justify-between items-center">
-                <h2 class="font-bold text-slate-800">我的题库</h2>
+                <h2 class="font-bold">本地题库</h2>
                 <button onclick="generateSpecializedExam()" class="bg-amber-500 text-white px-5 py-2 rounded-full font-bold text-xs shadow-md">
                     生成试卷 (<span id="selected-count">0</span>)
                 </button>
@@ -107,7 +104,6 @@
         </section>
     </main>
 
-    <!-- 打印模板 -->
     <div id="print-section" class="p-10">
         <div class="text-center border-b-2 border-slate-800 pb-6 mb-8">
             <h1 class="text-3xl font-bold mb-1">专项强化练习</h1>
@@ -116,90 +112,115 @@
         <div id="print-content"></div>
     </div>
 
-    <!-- Toast 提示 -->
     <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 bg-slate-800 text-white text-sm rounded-full shadow-2xl opacity-0 transition-opacity z-[300] pointer-events-none"></div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // 环境初始化
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'mistake-notebook-v1';
-
-        let user = null;
+        // 核心变量
         let mistakes = [];
+        let isCloud = false;
         let chart = null;
+        let unsubscribe = null;
 
-        // 统一提示
-        const showToast = (m) => {
+        // 提示功能
+        window.showToast = (m) => {
             const t = document.getElementById('toast');
             t.innerText = m; t.style.opacity = "1";
             setTimeout(() => t.style.opacity = "0", 2500);
         };
 
-        // 视图切换
+        // 切换视图
         window.switchView = (v) => {
             ['dashboard', 'add', 'list'].forEach(id => {
-                document.getElementById('view-'+id).classList.add('hidden');
-                document.getElementById('nav-'+id).className = "py-5 text-slate-400";
+                const el = document.getElementById('view-'+id);
+                if(el) el.classList.add('hidden');
+                const nav = document.getElementById('nav-'+id);
+                if(nav) nav.className = "py-5 text-slate-400";
             });
             document.getElementById('view-'+v).classList.remove('hidden');
             document.getElementById('nav-'+v).className = "py-5 text-amber-600 font-bold border-b-2 border-amber-600";
         };
 
-        // 身份认证
-        const startAuth = async () => {
+        // --- 数据存储核心逻辑 ---
+        const LOCAL_KEY = 'MISTAKE_PRO_DATA';
+
+        window.useLocalStorage = () => {
+            if (unsubscribe) unsubscribe();
+            isCloud = false;
+            document.getElementById('storage-mode').innerText = "本地模式";
+            document.getElementById('storage-mode').className = "text-[10px] bg-amber-100 text-amber-600 px-2 py-0.5 rounded-full font-normal";
+            document.getElementById('sync-info').innerText = "数据保存在此浏览器中。";
+            
+            const saved = localStorage.getItem(LOCAL_KEY);
+            mistakes = saved ? JSON.parse(saved) : [];
+            finishLoading();
+        };
+
+        const finishLoading = () => {
+            renderList();
+            updateStats();
+            document.getElementById('loading-overlay').style.display = 'none';
+        };
+
+        // --- 初始化 Firebase ---
+        const initSystem = async () => {
+            const timeout = setTimeout(() => {
+                if (!isCloud) document.getElementById('fallback-btn').classList.remove('hidden');
+            }, 6000);
+
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (e) { showToast("云端连接失败"); }
-        };
+                if (typeof __firebase_config === 'undefined') throw new Error("No config");
 
-        onAuthStateChanged(auth, (u) => {
-            user = u;
-            if (user) loadData();
-        });
+                const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const { getFirestore, collection, onSnapshot, query } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
 
-        // 实时同步数据
-        const loadData = () => {
-            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'mistakes');
-            onSnapshot(colRef, (snap) => {
-                mistakes = snap.docs.map(d => ({ id: d.id, ...d.data(), selected: false }));
-                mistakes.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                renderList();
-                updateStats();
-                document.getElementById('loading-overlay').classList.add('hidden');
-            });
-        };
+                const config = JSON.parse(__firebase_config);
+                const app = initializeApp(config);
+                const db = getFirestore(app);
+                const auth = getAuth(app);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'mistake-notebook-default';
 
-        // 统计更新
-        const updateStats = () => {
-            const counts = {};
-            mistakes.forEach(m => counts[m.subject] = (counts[m.subject] || 0) + 1);
-            document.getElementById('total-count').innerText = mistakes.length;
+                // 规则：必须先认证
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
 
-            if (!chart) {
-                const ctx = document.getElementById('subjectChart').getContext('2d');
-                chart = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: { labels: [], datasets: [{ data: [], backgroundColor: ['#D4A373', '#5D737E', '#A8D5BA', '#E5989B'] }] },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
+                await initAuth();
+
+                // 认证成功后的守卫逻辑
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        isCloud = true;
+                        clearTimeout(timeout);
+                        document.getElementById('storage-mode').innerText = "云端同步";
+                        document.getElementById('sync-info').innerText = "数据已加密同步至云端。";
+
+                        // 规则：使用特定的路径，并增加错误捕获回调
+                        const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'mistakes');
+                        unsubscribe = onSnapshot(colRef, (snap) => {
+                            mistakes = snap.docs.map(d => ({ id: d.id, ...d.data(), selected: false }));
+                            finishLoading();
+                        }, (err) => {
+                            console.error("Firestore Error:", err);
+                            if (!isCloud) useLocalStorage();
+                        });
+                    } else {
+                        useLocalStorage();
+                    }
                 });
+
+            } catch (e) {
+                console.error("Init Error:", e);
+                clearTimeout(timeout);
+                useLocalStorage();
             }
-            chart.data.labels = Object.keys(counts);
-            chart.data.datasets[0].data = Object.values(counts);
-            chart.update();
         };
 
-        // 画布逻辑
+        // --- 画布与图片处理 ---
         let cvs, ctx, drawing = false, lx = 0, ly = 0;
         window.handleImageUpload = (e) => {
             const file = e.target.files[0];
@@ -212,7 +233,8 @@
                     document.getElementById('editor-area').classList.remove('hidden');
                     cvs = document.getElementById('imageCanvas');
                     ctx = cvs.getContext('2d');
-                    const scale = Math.min(1, (window.innerWidth - 64) / img.width);
+                    const containerWidth = document.getElementById('view-add').clientWidth - 48;
+                    const scale = Math.min(1, containerWidth / img.width);
                     cvs.width = img.width * scale;
                     cvs.height = img.height * scale;
                     ctx.drawImage(img, 0, 0, cvs.width, cvs.height);
@@ -234,66 +256,121 @@
                     cvs.onmousedown = (ev) => { drawing = true; [lx, ly] = getPos(ev); };
                     cvs.onmousemove = move;
                     window.onmouseup = () => drawing = false;
-                    cvs.ontouchstart = (ev) => { drawing = true; [lx, ly] = getPos(ev); };
-                    cvs.ontouchmove = move;
+                    cvs.ontouchstart = (ev) => { drawing = true; [lx, ly] = getPos(ev); ev.preventDefault(); };
+                    cvs.ontouchmove = (ev) => { move(ev); ev.preventDefault(); };
                 };
                 img.src = ev.target.result;
             };
             reader.readAsDataURL(file);
         };
 
-        // 保存到云端
         window.saveMistake = async () => {
             const btn = document.getElementById('save-btn');
-            btn.disabled = true; btn.innerText = "上传中...";
-            try {
-                const data = cvs.toDataURL('image/jpeg', 0.6);
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mistakes'), {
-                    subject: document.getElementById('input-subject').value,
-                    tags: document.getElementById('input-tags').value || '未分类',
-                    imageSrc: data,
-                    createdAt: serverTimestamp()
-                });
-                showToast("保存成功");
-                resetEditor();
-                switchView('list');
-            } catch (e) { showToast("保存失败，请减小图片大小"); }
-            btn.disabled = false; btn.innerText = "保存到云端";
+            btn.disabled = true; btn.innerText = "处理中...";
+            
+            const data = {
+                subject: document.getElementById('input-subject').value,
+                tags: document.getElementById('input-tags').value || '未分类',
+                imageSrc: cvs.toDataURL('image/jpeg', 0.6),
+                createdAt: Date.now()
+            };
+
+            if (isCloud) {
+                try {
+                    const { addDoc, collection, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const db = getFirestore();
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'mistake-notebook-default';
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mistakes'), data);
+                    showToast("已同步到云端");
+                } catch (e) {
+                    console.error("Save Error:", e);
+                    showToast("云端权限不足，已转为本地保存");
+                    saveLocal(data);
+                }
+            } else {
+                saveLocal(data);
+                showToast("已保存到本地");
+            }
+
+            resetEditor();
+            switchView('list');
+            btn.disabled = false; btn.innerText = "保存错题";
         };
+
+        function saveLocal(item) {
+            item.id = 'local_' + Date.now();
+            mistakes.unshift(item);
+            localStorage.setItem(LOCAL_KEY, JSON.stringify(mistakes));
+            renderList();
+            updateStats();
+        }
 
         window.resetEditor = () => {
             document.getElementById('upload-area').classList.remove('hidden');
             document.getElementById('editor-area').classList.add('hidden');
-            document.getElementById('file-input').value = '';
         };
 
-        // 渲染题库
         function renderList() {
             const grid = document.getElementById('mistake-grid');
+            if(!grid) return;
             grid.innerHTML = '';
             mistakes.forEach(m => {
                 const div = document.createElement('div');
                 div.className = `bg-white p-3 rounded-2xl border-2 transition-all ${m.selected ? 'border-amber-500 bg-amber-50/50' : 'border-transparent shadow-sm'}`;
                 div.onclick = () => { m.selected = !m.selected; renderList(); };
                 div.innerHTML = `
-                    <img src="${m.imageSrc}" class="w-full h-32 object-contain rounded-lg mb-2">
-                    <div class="flex justify-between items-center text-[10px] text-slate-400 mb-1">
+                    <img src="${m.imageSrc}" class="w-full h-32 object-contain rounded-lg mb-2 bg-slate-50">
+                    <div class="flex justify-between items-center text-[10px] text-slate-400">
                         <span class="font-bold text-amber-600">${m.subject}</span>
-                        <span>${m.createdAt ? new Date(m.createdAt.seconds*1000).toLocaleDateString() : ''}</span>
+                        <button onclick="event.stopPropagation(); window.del('${m.id}')" class="text-red-300">删除</button>
                     </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs text-slate-700 truncate">${m.tags}</span>
-                        <button onclick="event.stopPropagation(); window.del('${m.id}')" class="text-red-300 hover:text-red-500 text-xs">删除</button>
-                    </div>
+                    <div class="text-xs text-slate-700 truncate mt-1">${m.tags}</div>
                 `;
                 grid.appendChild(div);
             });
-            document.getElementById('selected-count').innerText = mistakes.filter(x => x.selected).length;
+            const selCount = document.getElementById('selected-count');
+            if(selCount) selCount.innerText = mistakes.filter(x => x.selected).length;
         }
 
         window.del = async (id) => {
-            if(confirm("确定删除？")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mistakes', id));
+            if(!confirm("确定删除？")) return;
+            if(isCloud && !String(id).startsWith('local_')) {
+                try {
+                    const { deleteDoc, doc, getFirestore } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'mistake-notebook-default';
+                    await deleteDoc(doc(getFirestore(), 'artifacts', appId, 'public', 'data', 'mistakes', id));
+                } catch (e) {
+                    showToast("删除失败: 权限不足");
+                }
+            } else {
+                mistakes = mistakes.filter(m => m.id !== id);
+                localStorage.setItem(LOCAL_KEY, JSON.stringify(mistakes));
+                renderList();
+                updateStats();
+            }
         };
+
+        function updateStats() {
+            const counts = {};
+            mistakes.forEach(m => counts[m.subject] = (counts[m.subject] || 0) + 1);
+            const totalEl = document.getElementById('total-count');
+            if(totalEl) totalEl.innerText = mistakes.length;
+
+            const chartCanvas = document.getElementById('subjectChart');
+            if (!chartCanvas) return;
+            
+            if (!chart) {
+                const ctx = chartCanvas.getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: { labels: [], datasets: [{ data: [], backgroundColor: ['#D4A373', '#5D737E', '#A8D5BA', '#E5989B'] }] },
+                    options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'right', labels: { boxWidth: 8, font: { size: 9 } } } } }
+                });
+            }
+            chart.data.labels = Object.keys(counts);
+            chart.data.datasets[0].data = Object.values(counts);
+            chart.update();
+        }
 
         window.generateSpecializedExam = () => {
             const sel = mistakes.filter(m => m.selected);
@@ -302,7 +379,7 @@
             cont.innerHTML = '';
             sel.forEach((m, i) => {
                 cont.innerHTML += `<div class="mb-10" style="break-inside: avoid;">
-                    <p class="font-bold mb-3">题目 ${i+1} [${m.subject}]</p>
+                    <p class="font-bold mb-3">题目 ${i+1} [${m.subject}] - ${m.tags}</p>
                     <img src="${m.imageSrc}" class="max-w-full h-auto border rounded mb-4">
                     <div class="h-32 border border-dashed border-slate-200 rounded"></div>
                 </div>`;
@@ -310,7 +387,7 @@
             window.print();
         };
 
-        startAuth();
+        initSystem();
     </script>
 </body>
 </html>
